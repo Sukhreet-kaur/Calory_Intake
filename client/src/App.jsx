@@ -3,6 +3,8 @@ import FitnessGoalToggle from './components/FitnessGoalToggle';
 import CalorieProgressBar from './components/CalorieProgressBar';
 import MacronutrientDashboard from './components/MacronutrientDashboard';
 import FoodLoggingPanel from './components/FoodLoggingPanel';
+import DailyHistoryGrid from './components/DailyHistoryGrid';
+import WarningModal from './components/WarningModal';
 
 export default function App() {
   const [summary, setSummary] = useState(null);
@@ -11,6 +13,7 @@ export default function App() {
   const [hasGeminiKey, setHasGeminiKey] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showWarningModal, setShowWarningModal] = useState(false);
 
   // Fetch initial daily summary and meals state from server
   const fetchSummary = async () => {
@@ -39,6 +42,15 @@ export default function App() {
     fetchSummary();
   }, []);
 
+  // Check if budget exceeded to pop up Warning Modal
+  useEffect(() => {
+    if (summary && summary.budgetExceeded) {
+      setShowWarningModal(true);
+    } else {
+      setShowWarningModal(false);
+    }
+  }, [summary]);
+
   // Change Fitness Goal Mode
   const handleGoalChange = async (newGoalKey) => {
     if (newGoalKey === currentGoal) return;
@@ -63,7 +75,7 @@ export default function App() {
     }
   };
 
-  // Add a new Meal Item (Triggers AI / Baseline Nutrient Scaling Algorithm)
+  // Add a new Meal Item
   const handleAddMeal = async (foodName, weightGrams, customBase = null) => {
     try {
       setLoading(true);
@@ -82,6 +94,45 @@ export default function App() {
     } catch (err) {
       console.error(err);
       alert('Failed to connect to server to log meal.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Delete a Meal Item by ID
+  const handleDeleteMeal = async (mealId) => {
+    try {
+      setLoading(true);
+      const res = await fetch(`/api/meals/${mealId}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSummary(data.data.summary);
+        setMeals(data.data.meals);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Failed to delete meal item.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Clear All Meals
+  const handleClearAll = async () => {
+    if (!window.confirm('Are you sure you want to clear all logged meals for today?')) return;
+    try {
+      setLoading(true);
+      const res = await fetch('/api/meals', { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        setSummary(data.data.summary);
+        setMeals(data.data.meals);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Failed to clear meal logs.');
     } finally {
       setLoading(false);
     }
@@ -114,6 +165,20 @@ export default function App() {
           <CalorieProgressBar summary={summary} />
           <MacronutrientDashboard summary={summary} />
           <FoodLoggingPanel onAddMeal={handleAddMeal} loading={loading} hasGeminiKey={hasGeminiKey} />
+          <DailyHistoryGrid 
+            meals={meals} 
+            onDeleteMeal={handleDeleteMeal} 
+            onClearAll={handleClearAll} 
+            loading={loading} 
+          />
+
+          <WarningModal 
+            isOpen={showWarningModal} 
+            onClose={() => setShowWarningModal(false)}
+            overByCalories={summary.totals.calories - summary.targets.calories}
+            totalCalories={summary.totals.calories}
+            targetCalories={summary.targets.calories}
+          />
         </>
       )}
     </div>
