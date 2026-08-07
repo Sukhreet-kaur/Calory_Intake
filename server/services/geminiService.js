@@ -2,14 +2,21 @@ import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 dotenv.config();
 
-// Initialize Gemini API client if key is present
 let ai = null;
 if (process.env.GEMINI_API_KEY) {
   ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 }
 
+// Active models with vision & text support
+const PREFERRED_MODELS = [
+  'gemini-3-flash-preview',
+  'gemini-3.1-flash-lite',
+  'gemini-2.0-flash-lite',
+  'gemini-flash-latest'
+];
+
 /**
- * Real AI Image Food Scanner using Gemini 2.5 Vision
+ * Real AI Image Food Scanner using Gemini Vision
  */
 export async function analyzeFoodImage(imageBuffer, mimeType = 'image/jpeg') {
   if (!process.env.GEMINI_API_KEY || !ai) {
@@ -33,34 +40,43 @@ export async function analyzeFoodImage(imageBuffer, mimeType = 'image/jpeg') {
     }
   };
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: [prompt, imagePart]
-  });
+  let lastError = null;
+  for (const modelName of PREFERRED_MODELS) {
+    try {
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: [prompt, imagePart]
+      });
 
-  const text = response.text.trim().replace(/^```json/i, '').replace(/```$/i, '').trim();
-  const data = JSON.parse(text);
+      const text = response.text.trim().replace(/^```json/i, '').replace(/```$/i, '').trim();
+      const data = JSON.parse(text);
 
-  return {
-    foodName: data.foodName || 'Detected Meal',
-    estimatedWeightGrams: Number(data.estimatedWeightGrams) || 200,
-    caloriesPer100g: Number(data.caloriesPer100g) || 150,
-    proteinPer100g: Number(data.proteinPer100g) || 10,
-    carbsPer100g: Number(data.carbsPer100g) || 15,
-    fatsPer100g: Number(data.fatsPer100g) || 5
-  };
+      return {
+        foodName: data.foodName || 'Detected Meal',
+        estimatedWeightGrams: Number(data.estimatedWeightGrams) || 200,
+        caloriesPer100g: Number(data.caloriesPer100g) || 150,
+        proteinPer100g: Number(data.proteinPer100g) || 10,
+        carbsPer100g: Number(data.carbsPer100g) || 15,
+        fatsPer100g: Number(data.fatsPer100g) || 5
+      };
+    } catch (err) {
+      console.warn(`Model ${modelName} image scan failed:`, err.message);
+      lastError = err;
+    }
+  }
+
+  throw lastError || new Error('All AI models failed to process image');
 }
 
 /**
- * Real AI Nutritional Estimation for ANY custom food name entered by the user
+ * Real AI Nutritional Estimation for custom food names
  */
 export async function estimateNutrientsByAI(foodName) {
   if (!process.env.GEMINI_API_KEY || !ai) {
     return null;
   }
 
-  try {
-    const prompt = `Provide the standard nutritional breakdown per 100g for the food item: "${foodName}".
+  const prompt = `Provide the standard nutritional breakdown per 100g for the food item: "${foodName}".
 Return ONLY a raw JSON object (no markdown, no backticks) with this structure:
 {
   "caloriesPer100g": number,
@@ -69,22 +85,26 @@ Return ONLY a raw JSON object (no markdown, no backticks) with this structure:
   "fatsPer100g": number
 }`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [prompt]
-    });
+  for (const modelName of PREFERRED_MODELS) {
+    try {
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: [prompt]
+      });
 
-    const text = response.text.trim().replace(/^```json/i, '').replace(/```$/i, '').trim();
-    const data = JSON.parse(text);
+      const text = response.text.trim().replace(/^```json/i, '').replace(/```$/i, '').trim();
+      const data = JSON.parse(text);
 
-    return {
-      caloriesPer100g: Number(data.caloriesPer100g) || 160,
-      proteinPer100g: Number(data.proteinPer100g) || 10,
-      carbsPer100g: Number(data.carbsPer100g) || 20,
-      fatsPer100g: Number(data.fatsPer100g) || 5
-    };
-  } catch (err) {
-    console.error('Gemini text estimation error:', err);
-    return null;
+      return {
+        caloriesPer100g: Number(data.caloriesPer100g) || 160,
+        proteinPer100g: Number(data.proteinPer100g) || 10,
+        carbsPer100g: Number(data.carbsPer100g) || 20,
+        fatsPer100g: Number(data.fatsPer100g) || 5
+      };
+    } catch (err) {
+      console.warn(`Model ${modelName} text estimation failed:`, err.message);
+    }
   }
+
+  return null;
 }
